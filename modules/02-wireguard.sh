@@ -26,6 +26,26 @@ package_installed() {
   dpkg -s "$1" >/dev/null 2>&1
 }
 
+run_apt_get() {
+  local attempt=1
+  local max_attempts=10
+
+  while true; do
+    if apt-get -o DPkg::Lock::Timeout=300 "$@"; then
+      return
+    fi
+
+    if (( attempt >= max_attempts )); then
+      log_error "apt-get failed after ${max_attempts} attempts: apt-get $*"
+      exit 1
+    fi
+
+    log_warn "apt-get is busy or failed; retrying in 5 seconds (attempt ${attempt}/${max_attempts})."
+    attempt=$(( attempt + 1 ))
+    sleep 5
+  done
+}
+
 install_packages_if_missing() {
   local missing=()
   local pkg
@@ -41,8 +61,8 @@ install_packages_if_missing() {
     return
   fi
 
-  apt-get update -y
-  DEBIAN_FRONTEND=noninteractive apt-get install -y "${missing[@]}"
+  run_apt_get update -y
+  DEBIAN_FRONTEND=noninteractive run_apt_get install -y "${missing[@]}"
 }
 
 detect_default_interface_ipv4() {

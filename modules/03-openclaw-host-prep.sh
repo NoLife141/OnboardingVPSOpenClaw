@@ -22,12 +22,32 @@ require_bool() {
   fi
 }
 
+run_apt_get_ipv4() {
+  local attempt=1
+  local max_attempts=10
+
+  while true; do
+    if apt-get -o DPkg::Lock::Timeout=300 -o Acquire::ForceIPv4=true "$@"; then
+      return
+    fi
+
+    if (( attempt >= max_attempts )); then
+      log_error "apt-get failed after ${max_attempts} attempts: apt-get $*"
+      exit 1
+    fi
+
+    log_warn "apt-get is busy or failed; retrying in 5 seconds (attempt ${attempt}/${max_attempts})."
+    attempt=$(( attempt + 1 ))
+    sleep 5
+  done
+}
+
 apt_update_ipv4() {
-  apt-get -o Acquire::ForceIPv4=true update -y
+  run_apt_get_ipv4 update -y
 }
 
 apt_install_ipv4() {
-  DEBIAN_FRONTEND=noninteractive apt-get -o Acquire::ForceIPv4=true install -y "$@"
+  DEBIAN_FRONTEND=noninteractive run_apt_get_ipv4 install -y "$@"
 }
 
 package_installed() {

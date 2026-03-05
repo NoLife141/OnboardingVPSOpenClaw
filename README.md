@@ -83,6 +83,8 @@ Installer execution order is:
 
 This order ensures host package setup happens before full-tunnel WireGuard routing is enabled.
 
+If another package job is running (for example unattended upgrades), the modules wait for APT locks and retry instead of failing immediately.
+
 ## SSH Key Management
 
 Module 1 manages a dedicated block in `${HOME}/.ssh/authorized_keys` for `SSH_LOGIN_USER`.
