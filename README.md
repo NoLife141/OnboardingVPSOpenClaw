@@ -185,6 +185,16 @@ ssh -p <SSH_PORT> <SSH_LOGIN_USER>@your-vps
 sudo -i
 ```
 
+Important:
+
+- The script does not set or print a password for `SSH_LOGIN_USER`.
+- SSH access is expected to work with your managed SSH key(s), not a password.
+- If `SSH_LOGIN_USER_SUDO=true`, set a password manually after first login if your sudo policy requires one:
+
+```bash
+sudo passwd <SSH_LOGIN_USER>
+```
+
 ## What Module 03 Does Now
 
 `modules/03-openclaw-host-prep.sh` prepares the host only:
