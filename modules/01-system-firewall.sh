@@ -160,6 +160,61 @@ detect_current_ssh_port() {
   fi
 }
 
+discover_sshd_binary() {
+  if command -v sshd >/dev/null 2>&1; then
+    SSHD_BIN="$(command -v sshd)"
+  elif [[ -x /usr/sbin/sshd ]]; then
+    SSHD_BIN="/usr/sbin/sshd"
+  else
+    SSHD_BIN=""
+  fi
+}
+
+discover_ssh_service_unit() {
+  SSH_SERVICE_UNIT=""
+
+  if ! command -v systemctl >/dev/null 2>&1; then
+    return
+  fi
+
+  if systemctl cat ssh.service >/dev/null 2>&1; then
+    SSH_SERVICE_UNIT="ssh.service"
+  elif systemctl cat sshd.service >/dev/null 2>&1; then
+    SSH_SERVICE_UNIT="sshd.service"
+  fi
+}
+
+preflight_existing_ssh_stack() {
+  discover_sshd_binary
+  discover_ssh_service_unit
+
+  SSH_STACK_READY="false"
+  if [[ -n "${SSHD_BIN:-}" && -n "${SSH_SERVICE_UNIT:-}" ]]; then
+    SSH_STACK_READY="true"
+    if ss -lntp | grep -q sshd; then
+      log_info "Detected existing SSH listener and service (${SSH_SERVICE_UNIT})."
+    else
+      log_info "Detected existing SSH service (${SSH_SERVICE_UNIT}) with no current listener check hit."
+    fi
+  fi
+}
+
+ensure_ssh_stack_ready() {
+  preflight_existing_ssh_stack
+  if [[ "${SSH_STACK_READY}" == "true" ]]; then
+    return
+  fi
+
+  log_warn "No usable SSH stack detected. Installing openssh-server."
+  install_packages_if_missing openssh-server
+  preflight_existing_ssh_stack
+
+  if [[ "${SSH_STACK_READY}" != "true" ]]; then
+    log_error "Unable to detect a usable SSH daemon/service after installing openssh-server."
+    exit 1
+  fi
+}
+
 ensure_pam_google_authenticator() {
   local pam_file="/etc/pam.d/sshd"
   local pam_line="auth required pam_google_authenticator.so nullok"
@@ -236,8 +291,6 @@ EOF
 }
 
 ensure_ssh_service_enabled() {
-  SSH_SERVICE_UNIT=""
-
   if ! command -v systemctl >/dev/null 2>&1; then
     return
   fi
@@ -245,12 +298,6 @@ ensure_ssh_service_enabled() {
   systemctl daemon-reload >/dev/null 2>&1 || true
   systemctl unmask ssh.service >/dev/null 2>&1 || true
   systemctl unmask sshd.service >/dev/null 2>&1 || true
-
-  if systemctl cat ssh.service >/dev/null 2>&1; then
-    SSH_SERVICE_UNIT="ssh.service"
-  elif systemctl cat sshd.service >/dev/null 2>&1; then
-    SSH_SERVICE_UNIT="sshd.service"
-  fi
 
   if [[ -z "$SSH_SERVICE_UNIT" ]]; then
     log_error "Unable to detect a usable SSH service unit (ssh.service or sshd.service)."
@@ -296,19 +343,14 @@ validate_ssh_service_enabled() {
 }
 
 reload_ssh_safely() {
-  local sshd_bin
   local restart_required="false"
-  sshd_bin="$(command -v sshd || true)"
-  if [[ -z "$sshd_bin" && -x /usr/sbin/sshd ]]; then
-    sshd_bin="/usr/sbin/sshd"
-  fi
 
-  if [[ -z "$sshd_bin" ]]; then
+  if [[ -z "${SSHD_BIN:-}" ]]; then
     log_error "Unable to locate sshd binary."
     exit 1
   fi
 
-  if ! "$sshd_bin" -t; then
+  if ! "$SSHD_BIN" -t; then
     log_error "sshd -t failed. Refusing to reload SSH."
     exit 1
   fi
@@ -429,7 +471,8 @@ if [[ "${SSH_KEEP_CURRENT_PORT:-true}" == "true" ]] && [[ -z "$CURRENT_SSH_PORT"
 fi
 
 log_info "Installing required packages for firewall and SSH hardening."
-install_packages_if_missing ufw openssh-server
+ensure_ssh_stack_ready
+install_packages_if_missing ufw
 
 if [[ "$ENABLE_SSH_MFA" == "true" ]]; then
   install_packages_if_missing libpam-google-authenticator

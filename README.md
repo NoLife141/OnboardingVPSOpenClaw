@@ -94,6 +94,12 @@ Module 1 manages a dedicated block in `${HOME}/.ssh/authorized_keys` for `SSH_LO
   - `# BEGIN OnboardingVPSOpenClaw managed keys`
   - `# END OnboardingVPSOpenClaw managed keys`
 
+Before any SSH mutation, module 1 preflights the existing SSH stack:
+
+- it reuses the SSH server already present on the VPS when a usable `sshd` binary and service unit are detected
+- it installs `openssh-server` only if no usable SSH stack is found
+- it refuses to change ports, MFA, keys, sockets, or firewall state until that preflight succeeds
+
 ## WireGuard Key Handling
 
 You can optionally set:
