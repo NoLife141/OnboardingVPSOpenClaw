@@ -118,6 +118,7 @@ reload_ssh_safely() {
         log_warn "Detected active ssh.socket. Disabling socket activation so SSH can bind configured ports."
         systemctl disable --now ssh.socket >/dev/null 2>&1 || true
         systemctl stop ssh.socket >/dev/null 2>&1 || true
+        systemctl mask ssh.socket >/dev/null 2>&1 || true
         restart_required="true"
       fi
     fi
