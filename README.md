@@ -25,19 +25,19 @@ The scripts configure:
 - `modules/02-wireguard.sh`: WireGuard setup + policy routing validation
 - `modules/03-openclaw-host-prep.sh`: host preparation for manual OpenClaw install
 
-## 1. Copy files to VPS
+## 1. Clone repository on VPS
 
-From your local machine:
-
-```bash
-scp -P <current-ssh-port> -r ./OnboardingVPSOpenClaw user@your-vps:/root/
-```
-
-Then connect:
+Connect to your VPS:
 
 ```bash
 ssh -p <current-ssh-port> user@your-vps
-cd /root/OnboardingVPSOpenClaw
+```
+
+Clone and enter the project:
+
+```bash
+git clone https://github.com/NoLife141/OnboardingVPSOpenClaw.git
+cd OnboardingVPSOpenClaw
 ```
 
 ## 2. Create config.env
