@@ -22,6 +22,38 @@ require_bool() {
   fi
 }
 
+detect_default_interface_ipv4() {
+  local iface
+  iface="$(ip -4 -o route show default | awk 'NR==1 {print $5}')"
+  if [[ -z "$iface" ]]; then
+    return 1
+  fi
+
+  ip -4 -o addr show dev "$iface" scope global | awk 'NR==1 {print $4}' | cut -d/ -f1
+}
+
+resolve_public_ssh_source_ip() {
+  if [[ "${WG_PRESERVE_PUBLIC_SSH_ROUTE}" != "true" ]]; then
+    WG_PUBLIC_SSH_SOURCE_IP=""
+    return
+  fi
+
+  if [[ -z "${WG_PUBLIC_SSH_SOURCE_IP}" ]]; then
+    WG_PUBLIC_SSH_SOURCE_IP="$(detect_default_interface_ipv4 || true)"
+  fi
+
+  if [[ -z "${WG_PUBLIC_SSH_SOURCE_IP}" ]]; then
+    log_error "Unable to detect WG_PUBLIC_SSH_SOURCE_IP."
+    log_error "Set WG_PUBLIC_SSH_SOURCE_IP manually in config.env to preserve SSH public return path."
+    exit 1
+  fi
+
+  if [[ ! "${WG_PUBLIC_SSH_SOURCE_IP}" =~ ^([0-9]{1,3}\.){3}[0-9]{1,3}$ ]]; then
+    log_error "Invalid WG_PUBLIC_SSH_SOURCE_IP: ${WG_PUBLIC_SSH_SOURCE_IP}"
+    exit 1
+  fi
+}
+
 wg_conf_value() {
   local section="$1"
   local key="$2"
@@ -182,6 +214,10 @@ write_wireguard_config() {
     if [[ -n "${WG_DNS:-}" ]]; then
       echo "DNS = ${WG_DNS}"
     fi
+    if [[ "${WG_PRESERVE_PUBLIC_SSH_ROUTE}" == "true" && -n "${WG_PUBLIC_SSH_SOURCE_IP}" ]]; then
+      echo "PostUp = ip -4 rule del pref 100 from ${WG_PUBLIC_SSH_SOURCE_IP}/32 table main 2>/dev/null || true; ip -4 rule add pref 100 from ${WG_PUBLIC_SSH_SOURCE_IP}/32 table main"
+      echo "PostDown = ip -4 rule del pref 100 from ${WG_PUBLIC_SSH_SOURCE_IP}/32 table main 2>/dev/null || true"
+    fi
     echo
     echo "[Peer]"
     echo "PublicKey = ${WG_HOME_PUBKEY}"
@@ -230,6 +266,13 @@ validate_policy_routing() {
     log_error "AllowedIPs does not include 0.0.0.0/0; private egress requirement is not met."
     exit 1
   fi
+
+  if [[ "${WG_PRESERVE_PUBLIC_SSH_ROUTE}" == "true" && -n "${WG_PUBLIC_SSH_SOURCE_IP}" ]]; then
+    if ! ip -4 rule show | grep -q "from ${WG_PUBLIC_SSH_SOURCE_IP}/32 lookup main"; then
+      log_error "Public SSH return-path rule missing for ${WG_PUBLIC_SSH_SOURCE_IP}/32."
+      exit 1
+    fi
+  fi
 }
 
 if [[ $EUID -ne 0 ]]; then
@@ -255,9 +298,12 @@ WG_FWMARK="${WG_FWMARK:-51820}"
 WG_AUTO_GENERATE_VPS_KEY="${WG_AUTO_GENERATE_VPS_KEY:-true}"
 WG_VPS_PRIVKEY_FILE="${WG_VPS_PRIVKEY_FILE:-/etc/wireguard/${WG_INTERFACE}.privatekey}"
 WG_CLIENT_CONFIG_FILE="${WG_CLIENT_CONFIG_FILE:-}"
+WG_PRESERVE_PUBLIC_SSH_ROUTE="${WG_PRESERVE_PUBLIC_SSH_ROUTE:-true}"
+WG_PUBLIC_SSH_SOURCE_IP="${WG_PUBLIC_SSH_SOURCE_IP:-}"
 WG_VPS_PRIVATE_KEY_EFFECTIVE=""
 
 import_wireguard_client_config_if_set
+resolve_public_ssh_source_ip
 
 require_var WG_INTERFACE
 require_var WG_VPS_IP
@@ -268,7 +314,9 @@ require_var WG_PERSISTENT_KEEPALIVE
 require_var WG_FWMARK
 require_var WG_AUTO_GENERATE_VPS_KEY
 require_var WG_VPS_PRIVKEY_FILE
+require_var WG_PRESERVE_PUBLIC_SSH_ROUTE
 require_bool WG_AUTO_GENERATE_VPS_KEY
+require_bool WG_PRESERVE_PUBLIC_SSH_ROUTE
 
 log_info "Installing WireGuard packages."
 apt-get update -y

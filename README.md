@@ -59,6 +59,8 @@ Edit `config.env` and fill values:
 - `WG_VPS_PRIVKEY`: optional VPS private key (leave empty to auto-generate)
 - `WG_AUTO_GENERATE_VPS_KEY`: when `true`, generate key if missing
 - `WG_VPS_PRIVKEY_FILE`: secure path used to persist auto-generated key
+- `WG_PRESERVE_PUBLIC_SSH_ROUTE`: keep SSH public-IP return path out of tunnel
+- `WG_PUBLIC_SSH_SOURCE_IP`: optional source IP override for SSH return-path rule
 - `OPENCLAW_PORT`: future host port for OpenClaw gateway
 - `OPENCLAW_SETUP_DIR`: directory prepared for later OpenClaw install
 - `OPENCLAW_SETUP_USER`: owner for prepared directory
@@ -102,6 +104,11 @@ If `WG_ALLOWED_IPS` is IPv4-only (for example `0.0.0.0/0`), module 2 writes:
 - `/etc/apt/apt.conf.d/99-openclaw-force-ipv4`
 
 This avoids `apt` stalls on unreachable IPv6 endpoints after the full-tunnel route is enabled.
+
+## Public SSH Return-Path Protection
+
+With `AllowedIPs=0.0.0.0/0`, module 2 adds a policy rule that keeps traffic sourced from your public SSH IP on the main routing table (outside `wg0`).  
+This prevents asymmetric routing lockouts when WireGuard full tunnel is enabled.
 
 ## SSH Lockout Safety Model
 
