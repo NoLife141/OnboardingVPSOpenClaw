@@ -212,26 +212,44 @@ ensure_ssh_service_enabled() {
     return
   fi
 
+  systemctl daemon-reload >/dev/null 2>&1 || true
   systemctl unmask ssh.service >/dev/null 2>&1 || true
+  systemctl unmask sshd.service >/dev/null 2>&1 || true
+
   if systemctl list-unit-files | grep -q '^ssh\.service'; then
     systemctl enable ssh.service >/dev/null 2>&1 || true
-  elif systemctl list-unit-files | grep -q '^sshd\.service'; then
+  fi
+  if systemctl list-unit-files | grep -q '^sshd\.service'; then
     systemctl enable sshd.service >/dev/null 2>&1 || true
   fi
 }
 
 validate_ssh_service_enabled() {
+  local state=""
+
   if ! command -v systemctl >/dev/null 2>&1; then
     return
   fi
 
   if systemctl list-unit-files | grep -q '^ssh\.service'; then
-    if ! systemctl is-enabled ssh.service >/dev/null 2>&1; then
+    state="$(systemctl is-enabled ssh.service 2>/dev/null || true)"
+    case "$state" in
+      enabled|enabled-runtime|static|alias|indirect|generated|linked|linked-runtime)
+        return
+        ;;
+    esac
+    if ! systemctl is-active --quiet ssh.service; then
       log_error "ssh.service is not enabled for boot."
       exit 1
     fi
   elif systemctl list-unit-files | grep -q '^sshd\.service'; then
-    if ! systemctl is-enabled sshd.service >/dev/null 2>&1; then
+    state="$(systemctl is-enabled sshd.service 2>/dev/null || true)"
+    case "$state" in
+      enabled|enabled-runtime|static|alias|indirect|generated|linked|linked-runtime)
+        return
+        ;;
+    esac
+    if ! systemctl is-active --quiet sshd.service; then
       log_error "sshd.service is not enabled for boot."
       exit 1
     fi
@@ -265,6 +283,7 @@ reload_ssh_safely() {
         systemctl disable --now ssh.socket >/dev/null 2>&1 || true
         systemctl stop ssh.socket >/dev/null 2>&1 || true
         systemctl mask ssh.socket >/dev/null 2>&1 || true
+        systemctl daemon-reload >/dev/null 2>&1 || true
         restart_required="true"
       fi
     fi
