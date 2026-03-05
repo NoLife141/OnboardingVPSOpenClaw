@@ -229,7 +229,10 @@ EOF
 
   chmod 0644 /etc/systemd/system/openclaw-ssh-boot-guard.service
   systemctl daemon-reload >/dev/null 2>&1 || true
-  systemctl enable openclaw-ssh-boot-guard.service >/dev/null 2>&1 || true
+  if ! systemctl enable openclaw-ssh-boot-guard.service >/dev/null 2>&1; then
+    log_error "Unable to enable openclaw-ssh-boot-guard.service."
+    exit 1
+  fi
 }
 
 ensure_ssh_service_enabled() {
@@ -243,58 +246,53 @@ ensure_ssh_service_enabled() {
   systemctl unmask ssh.service >/dev/null 2>&1 || true
   systemctl unmask sshd.service >/dev/null 2>&1 || true
 
-  if systemctl list-unit-files | grep -q '^ssh\.service'; then
-    if systemctl enable ssh.service >/dev/null 2>&1; then
-      SSH_SERVICE_UNIT="ssh.service"
-      return
-    fi
-  fi
-  if systemctl list-unit-files | grep -q '^sshd\.service'; then
-    if systemctl enable sshd.service >/dev/null 2>&1; then
-      SSH_SERVICE_UNIT="sshd.service"
-      return
-    fi
+  if systemctl cat ssh.service >/dev/null 2>&1; then
+    SSH_SERVICE_UNIT="ssh.service"
+  elif systemctl cat sshd.service >/dev/null 2>&1; then
+    SSH_SERVICE_UNIT="sshd.service"
   fi
 
-  if systemctl list-unit-files | grep -q '^ssh\.service'; then
-    if systemctl start ssh.service >/dev/null 2>&1; then
-      SSH_SERVICE_UNIT="ssh.service"
-      log_warn "ssh.service started, but enabling it for boot failed."
-      return
-    fi
-  fi
-  if systemctl list-unit-files | grep -q '^sshd\.service'; then
-    if systemctl start sshd.service >/dev/null 2>&1; then
-      SSH_SERVICE_UNIT="sshd.service"
-      log_warn "sshd.service started, but enabling it for boot failed."
-      return
-    fi
+  if [[ -z "$SSH_SERVICE_UNIT" ]]; then
+    log_error "Unable to detect a usable SSH service unit (ssh.service or sshd.service)."
+    exit 1
   fi
 
-  log_error "Unable to enable or start a usable SSH service unit."
-  exit 1
+  if ! systemctl enable "$SSH_SERVICE_UNIT" >/dev/null 2>&1; then
+    log_warn "Could not enable ${SSH_SERVICE_UNIT} directly; relying on boot-guard unit for reboot safety."
+  fi
 }
 
-validate_ssh_service_enabled() {
+validate_ssh_boot_guard_enabled() {
   local state=""
 
   if ! command -v systemctl >/dev/null 2>&1; then
     return
   fi
 
+  state="$(systemctl is-enabled openclaw-ssh-boot-guard.service 2>/dev/null || true)"
+  case "$state" in
+    enabled|enabled-runtime|static|alias|indirect|generated|linked|linked-runtime)
+      return
+      ;;
+  esac
+
+  log_error "openclaw-ssh-boot-guard.service is not enabled for boot."
+  exit 1
+}
+
+validate_ssh_service_enabled() {
+  if ! command -v systemctl >/dev/null 2>&1; then
+    return
+  fi
+
   if [[ -n "${SSH_SERVICE_UNIT:-}" ]]; then
-    state="$(systemctl is-enabled "${SSH_SERVICE_UNIT}" 2>/dev/null || true)"
-    case "$state" in
-      enabled|enabled-runtime|static|alias|indirect|generated|linked|linked-runtime)
-        return
-        ;;
-    esac
     if ! systemctl is-active --quiet "${SSH_SERVICE_UNIT}"; then
       log_error "${SSH_SERVICE_UNIT} is not active."
       exit 1
     fi
-    log_warn "${SSH_SERVICE_UNIT} is active, but its boot enable state is '${state:-unknown}'."
   fi
+
+  validate_ssh_boot_guard_enabled
 }
 
 reload_ssh_safely() {
@@ -337,16 +335,7 @@ reload_ssh_safely() {
     if [[ "$restart_required" == "true" ]]; then
       if [[ -n "${SSH_SERVICE_UNIT:-}" ]] && systemctl restart "${SSH_SERVICE_UNIT}" >/dev/null 2>&1; then
         :
-      elif systemctl restart ssh >/dev/null 2>&1; then
-        SSH_SERVICE_UNIT="ssh.service"
-      elif systemctl restart ssh.service >/dev/null 2>&1; then
-        SSH_SERVICE_UNIT="ssh.service"
-        :
-      elif systemctl restart sshd >/dev/null 2>&1; then
-        SSH_SERVICE_UNIT="sshd.service"
-        :
-      elif systemctl restart sshd.service >/dev/null 2>&1; then
-        SSH_SERVICE_UNIT="sshd.service"
+      elif [[ -n "${SSH_SERVICE_UNIT:-}" ]] && systemctl start "${SSH_SERVICE_UNIT}" >/dev/null 2>&1; then
         :
       else
         log_error "Unable to restart SSH after disabling ssh.socket."
@@ -354,16 +343,7 @@ reload_ssh_safely() {
       fi
     elif [[ -n "${SSH_SERVICE_UNIT:-}" ]] && systemctl reload "${SSH_SERVICE_UNIT}" >/dev/null 2>&1; then
       :
-    elif systemctl reload ssh >/dev/null 2>&1; then
-      SSH_SERVICE_UNIT="ssh.service"
-    elif systemctl reload ssh.service >/dev/null 2>&1; then
-      SSH_SERVICE_UNIT="ssh.service"
-      :
-    elif systemctl reload sshd >/dev/null 2>&1; then
-      SSH_SERVICE_UNIT="sshd.service"
-      :
-    elif systemctl reload sshd.service >/dev/null 2>&1; then
-      SSH_SERVICE_UNIT="sshd.service"
+    elif [[ -n "${SSH_SERVICE_UNIT:-}" ]] && systemctl restart "${SSH_SERVICE_UNIT}" >/dev/null 2>&1; then
       :
     else
       log_error "Unable to reload SSH via systemctl (tried ssh/sshd service names)."
