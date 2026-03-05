@@ -55,6 +55,7 @@ Edit `config.env` and fill values:
 - `WG_VPS_IP`: VPS WireGuard address in CIDR
 - `WG_HOME_ENDPOINT`: home server endpoint (`host:port`)
 - `WG_HOME_PUBKEY`: home server public key
+- `WG_CLIENT_CONFIG_FILE`: optional path to UniFi-exported WireGuard client config
 - `WG_VPS_PRIVKEY`: optional VPS private key (leave empty to auto-generate)
 - `WG_AUTO_GENERATE_VPS_KEY`: when `true`, generate key if missing
 - `WG_VPS_PRIVKEY_FILE`: secure path used to persist auto-generated key
@@ -79,6 +80,12 @@ Installer execution order is:
 This order ensures host package setup happens before full-tunnel WireGuard routing is enabled.
 
 ## WireGuard Key Handling
+
+You can optionally set:
+
+- `WG_CLIENT_CONFIG_FILE=/absolute/path/to/client.conf`
+
+When set, module 2 imports values from the client config (`Address`, `PrivateKey`, `DNS`, `PublicKey`, `Endpoint`, `AllowedIPs`, optional `PresharedKey` and `PersistentKeepalive`) and uses them as source of truth.
 
 If `WG_VPS_PRIVKEY` is empty, module 2 will:
 

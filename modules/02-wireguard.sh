@@ -22,6 +22,86 @@ require_bool() {
   fi
 }
 
+wg_conf_value() {
+  local section="$1"
+  local key="$2"
+  local file="$3"
+
+  awk -v section="$section" -v key="$key" '
+    function trim(s) {
+      gsub(/^[[:space:]]+|[[:space:]]+$/, "", s)
+      return s
+    }
+    BEGIN { in_section = 0 }
+    {
+      line = $0
+      gsub(/\r/, "", line)
+      sub(/[[:space:]]*[#;].*$/, "", line)
+      line = trim(line)
+      if (line == "") next
+
+      if (line ~ /^\[[^]]+\]$/) {
+        in_section = (tolower(line) == "[" tolower(section) "]")
+        next
+      }
+
+      if (in_section && index(line, "=") > 0) {
+        k = trim(substr(line, 1, index(line, "=") - 1))
+        v = trim(substr(line, index(line, "=") + 1))
+        if (tolower(k) == tolower(key)) {
+          print v
+          exit
+        }
+      }
+    }
+  ' "$file"
+}
+
+import_wireguard_client_config_if_set() {
+  local cfg="${WG_CLIENT_CONFIG_FILE:-}"
+  if [[ -z "$cfg" ]]; then
+    return
+  fi
+
+  if [[ ! -f "$cfg" ]]; then
+    log_error "WG_CLIENT_CONFIG_FILE not found: ${cfg}"
+    exit 1
+  fi
+
+  local v
+  v="$(wg_conf_value Interface Address "$cfg")"
+  WG_VPS_IP="$v"
+
+  v="$(wg_conf_value Interface PrivateKey "$cfg")"
+  WG_VPS_PRIVKEY="$v"
+  if [[ -n "$v" ]]; then
+    WG_VPS_PRIVKEY="$v"
+    WG_AUTO_GENERATE_VPS_KEY="false"
+  fi
+
+  v="$(wg_conf_value Interface DNS "$cfg")"
+  WG_DNS="$v"
+
+  v="$(wg_conf_value Peer PublicKey "$cfg")"
+  WG_HOME_PUBKEY="$v"
+
+  v="$(wg_conf_value Peer Endpoint "$cfg")"
+  WG_HOME_ENDPOINT="$v"
+
+  v="$(wg_conf_value Peer AllowedIPs "$cfg")"
+  WG_ALLOWED_IPS="$v"
+
+  v="$(wg_conf_value Peer PresharedKey "$cfg")"
+  WG_HOME_PRESHARED_KEY="$v"
+
+  v="$(wg_conf_value Peer PersistentKeepalive "$cfg")"
+  if [[ -n "$v" ]]; then
+    WG_PERSISTENT_KEEPALIVE="$v"
+  fi
+
+  log_info "Imported WireGuard client settings from ${cfg}."
+}
+
 validate_private_key_format() {
   local key="$1"
   if [[ ! "$key" =~ ^[A-Za-z0-9+/=]+$ ]]; then
@@ -174,7 +254,10 @@ WG_PERSISTENT_KEEPALIVE="${WG_PERSISTENT_KEEPALIVE:-25}"
 WG_FWMARK="${WG_FWMARK:-51820}"
 WG_AUTO_GENERATE_VPS_KEY="${WG_AUTO_GENERATE_VPS_KEY:-true}"
 WG_VPS_PRIVKEY_FILE="${WG_VPS_PRIVKEY_FILE:-/etc/wireguard/${WG_INTERFACE}.privatekey}"
+WG_CLIENT_CONFIG_FILE="${WG_CLIENT_CONFIG_FILE:-}"
 WG_VPS_PRIVATE_KEY_EFFECTIVE=""
+
+import_wireguard_client_config_if_set
 
 require_var WG_INTERFACE
 require_var WG_VPS_IP
