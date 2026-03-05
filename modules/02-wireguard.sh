@@ -22,6 +22,29 @@ require_bool() {
   fi
 }
 
+package_installed() {
+  dpkg -s "$1" >/dev/null 2>&1
+}
+
+install_packages_if_missing() {
+  local missing=()
+  local pkg
+
+  for pkg in "$@"; do
+    if ! package_installed "$pkg"; then
+      missing+=("$pkg")
+    fi
+  done
+
+  if (( ${#missing[@]} == 0 )); then
+    log_info "Required packages already installed: $*"
+    return
+  fi
+
+  apt-get update -y
+  DEBIAN_FRONTEND=noninteractive apt-get install -y "${missing[@]}"
+}
+
 detect_default_interface_ipv4() {
   local iface
   iface="$(ip -4 -o route show default | awk 'NR==1 {print $5}')"
@@ -319,8 +342,7 @@ require_bool WG_AUTO_GENERATE_VPS_KEY
 require_bool WG_PRESERVE_PUBLIC_SSH_ROUTE
 
 log_info "Installing WireGuard packages."
-apt-get update -y
-DEBIAN_FRONTEND=noninteractive apt-get install -y wireguard wireguard-tools
+install_packages_if_missing wireguard wireguard-tools
 
 mkdir -p /etc/wireguard
 chmod 700 /etc/wireguard

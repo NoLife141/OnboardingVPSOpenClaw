@@ -22,6 +22,29 @@ require_port() {
   fi
 }
 
+package_installed() {
+  dpkg -s "$1" >/dev/null 2>&1
+}
+
+install_packages_if_missing() {
+  local missing=()
+  local pkg
+
+  for pkg in "$@"; do
+    if ! package_installed "$pkg"; then
+      missing+=("$pkg")
+    fi
+  done
+
+  if (( ${#missing[@]} == 0 )); then
+    log_info "Required packages already installed: $*"
+    return
+  fi
+
+  apt-get update -y
+  DEBIAN_FRONTEND=noninteractive apt-get install -y "${missing[@]}"
+}
+
 detect_public_interface() {
   ip -o route show default | awk '{print $5; exit}'
 }
@@ -227,11 +250,10 @@ if [[ "${SSH_KEEP_CURRENT_PORT:-true}" == "true" ]] && [[ -z "$CURRENT_SSH_PORT"
 fi
 
 log_info "Installing required packages for firewall and SSH hardening."
-apt-get update -y
-DEBIAN_FRONTEND=noninteractive apt-get install -y ufw openssh-server
+install_packages_if_missing ufw openssh-server
 
 if [[ "$ENABLE_SSH_MFA" == "true" ]]; then
-  DEBIAN_FRONTEND=noninteractive apt-get install -y libpam-google-authenticator
+  install_packages_if_missing libpam-google-authenticator
 fi
 
 ensure_pam_google_authenticator
