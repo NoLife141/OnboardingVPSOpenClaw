@@ -232,6 +232,50 @@ ensure_pam_google_authenticator() {
   fi
 }
 
+ensure_sshd_config_includes_dropins() {
+  local target="/etc/ssh/sshd_config"
+  local include_line="Include /etc/ssh/sshd_config.d/*.conf"
+
+  if grep -Fqx "$include_line" "$target"; then
+    return
+  fi
+
+  printf '\n%s\n' "$include_line" >> "$target"
+}
+
+write_sshd_port_block() {
+  local target="/etc/ssh/sshd_config"
+  local tmp_file
+  local begin_marker="# BEGIN OnboardingVPSOpenClaw managed ports"
+  local end_marker="# END OnboardingVPSOpenClaw managed ports"
+
+  tmp_file="$(mktemp)"
+
+  awk -v begin="$begin_marker" -v end="$end_marker" '
+    $0 == begin { skip = 1; next }
+    $0 == end { skip = 0; next }
+    !skip { print }
+  ' "$target" > "$tmp_file"
+
+  {
+    cat "$tmp_file"
+    if [[ -s "$tmp_file" ]] && [[ "$(tail -c1 "$tmp_file" 2>/dev/null || true)" != $'\n' ]]; then
+      printf '\n'
+    fi
+    printf '%s\n' "$begin_marker"
+    printf 'Port %s\n' "$SSH_PORT"
+    if [[ "${SSH_KEEP_CURRENT_PORT:-true}" == "true" ]] \
+      && [[ -n "${CURRENT_SSH_PORT:-}" ]] \
+      && [[ "$CURRENT_SSH_PORT" != "$SSH_PORT" ]]; then
+      printf 'Port %s\n' "$CURRENT_SSH_PORT"
+    fi
+    printf '%s\n' "$end_marker"
+  } > "${tmp_file}.new"
+
+  install -m 0644 "${tmp_file}.new" "$target"
+  rm -f "$tmp_file" "${tmp_file}.new"
+}
+
 write_sshd_hardening_config() {
   local target="/etc/ssh/sshd_config.d/99-openclaw-hardening.conf"
   local tmp_file
@@ -249,17 +293,20 @@ write_sshd_hardening_config() {
       echo "KbdInteractiveAuthentication no"
       echo "ChallengeResponseAuthentication no"
     fi
-
-    echo "Port ${SSH_PORT}"
-    if [[ "${SSH_KEEP_CURRENT_PORT:-true}" == "true" ]] \
-      && [[ -n "${CURRENT_SSH_PORT:-}" ]] \
-      && [[ "$CURRENT_SSH_PORT" != "$SSH_PORT" ]]; then
-      echo "Port ${CURRENT_SSH_PORT}"
-    fi
   } > "$tmp_file"
 
   install -m 0644 "$tmp_file" "$target"
   rm -f "$tmp_file"
+}
+
+validate_effective_sshd_port_config() {
+  local effective_ports
+
+  effective_ports="$("$SSHD_BIN" -T 2>/dev/null | awk '/^port / {print $2}')"
+  if ! grep -qx "$SSH_PORT" <<<"$effective_ports"; then
+    log_error "Effective sshd config does not include target SSH port ${SSH_PORT}."
+    exit 1
+  fi
 }
 
 write_ssh_boot_guard_unit() {
@@ -481,7 +528,10 @@ fi
 ensure_login_user_exists
 ensure_authorized_keys_managed
 ensure_pam_google_authenticator
+ensure_sshd_config_includes_dropins
+write_sshd_port_block
 write_sshd_hardening_config
+validate_effective_sshd_port_config
 reload_ssh_safely
 
 log_info "Allowing SSH on ${PUBLIC_INTERFACE}:${SSH_PORT}"

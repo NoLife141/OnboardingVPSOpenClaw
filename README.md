@@ -133,14 +133,17 @@ This prevents asymmetric routing lockouts when WireGuard full tunnel is enabled.
 
 The scripts are designed to reduce lockout risk:
 
-1. SSH config is written to `/etc/ssh/sshd_config.d/99-openclaw-hardening.conf`.
-2. `sshd -t` is executed before reload.
-3. `ssh.socket` is disabled and masked if present, and `ssh.service` is explicitly enabled for boot.
-4. SSH daemon is reloaded or restarted safely depending on socket activation state.
-5. A systemd boot-guard unit is installed to start SSH after boot if the image has unusual SSH unit wiring.
-6. Script verifies SSH is listening on `SSH_PORT`.
-7. If `SSH_KEEP_CURRENT_PORT=true`, script also keeps current SSH port open in SSH and UFW.
-8. SSH is allowed on both the public interface and `wg0`.
+1. SSH ports are managed directly in `/etc/ssh/sshd_config` with a dedicated managed block.
+2. SSH auth hardening is written to `/etc/ssh/sshd_config.d/99-openclaw-hardening.conf`.
+3. The script ensures `/etc/ssh/sshd_config` includes `sshd_config.d/*.conf`.
+4. `sshd -t` is executed before reload.
+5. `sshd -T` is checked to confirm the target SSH port is in the effective config.
+6. `ssh.socket` is disabled and masked if present, and `ssh.service` is explicitly enabled for boot.
+7. SSH daemon is reloaded or restarted safely depending on socket activation state.
+8. A systemd boot-guard unit is installed to start SSH after boot if the image has unusual SSH unit wiring.
+9. Script verifies SSH is listening on `SSH_PORT`.
+10. If `SSH_KEEP_CURRENT_PORT=true`, script also keeps current SSH port open in SSH and UFW.
+11. SSH is allowed on both the public interface and `wg0`.
 
 Recommended migration procedure:
 
