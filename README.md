@@ -55,7 +55,9 @@ Edit `config.env` and fill values:
 - `WG_VPS_IP`: VPS WireGuard address in CIDR
 - `WG_HOME_ENDPOINT`: home server endpoint (`host:port`)
 - `WG_HOME_PUBKEY`: home server public key
-- `WG_VPS_PRIVKEY`: VPS private key
+- `WG_VPS_PRIVKEY`: optional VPS private key (leave empty to auto-generate)
+- `WG_AUTO_GENERATE_VPS_KEY`: when `true`, generate key if missing
+- `WG_VPS_PRIVKEY_FILE`: secure path used to persist auto-generated key
 - `OPENCLAW_PORT`: future host port for OpenClaw gateway
 - `OPENCLAW_SETUP_DIR`: directory prepared for later OpenClaw install
 - `OPENCLAW_SETUP_USER`: owner for prepared directory
@@ -68,6 +70,16 @@ Edit `config.env` and fill values:
 ```bash
 sudo ./install.sh
 ```
+
+## WireGuard Key Handling
+
+If `WG_VPS_PRIVKEY` is empty, module 2 will:
+
+1. Reuse `WG_VPS_PRIVKEY_FILE` if it already exists.
+2. Otherwise generate a new private key (when `WG_AUTO_GENERATE_VPS_KEY=true`).
+3. Save the matching public key to `${WG_VPS_PRIVKEY_FILE}.pub`.
+
+Private keys are never printed in logs.
 
 ## SSH Lockout Safety Model
 

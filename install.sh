@@ -45,7 +45,6 @@ require_var SSH_PORT
 require_var WG_VPS_IP
 require_var WG_HOME_ENDPOINT
 require_var WG_HOME_PUBKEY
-require_var WG_VPS_PRIVKEY
 require_var OPENCLAW_PORT
 require_var ENABLE_SSH_MFA
 require_port SSH_PORT
