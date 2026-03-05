@@ -49,8 +49,10 @@ cp config.env.example config.env
 Edit `config.env` and fill values:
 
 - `SSH_PORT`: target SSH port
+- `SSH_LOGIN_USER`: Linux user whose `authorized_keys` will be managed
 - `SSH_KEEP_CURRENT_PORT`: keep currently used SSH port open for safe migration (`true` recommended on first run)
 - `SSH_CURRENT_PORT_OVERRIDE`: optional manual current SSH port fallback for migration safety
+- `SSH_AUTHORIZED_KEY_1`, `SSH_AUTHORIZED_KEY_2`, ...: inline public keys to install for `SSH_LOGIN_USER`
 - `ENABLE_SSH_MFA`: `true` or `false`
 - `WG_VPS_IP`: VPS WireGuard address in CIDR
 - `WG_HOME_ENDPOINT`: home server endpoint (`host:port`)
@@ -80,6 +82,17 @@ Installer execution order is:
 3. `02-wireguard.sh`
 
 This order ensures host package setup happens before full-tunnel WireGuard routing is enabled.
+
+## SSH Key Management
+
+Module 1 manages a dedicated block in `${HOME}/.ssh/authorized_keys` for `SSH_LOGIN_USER`.
+
+- Keys come from `SSH_AUTHORIZED_KEY_1`, `SSH_AUTHORIZED_KEY_2`, and so on.
+- At least one non-empty `SSH_AUTHORIZED_KEY_*` entry is required before password auth is disabled.
+- Existing unmanaged keys outside the managed block are preserved.
+- Managed block markers are:
+  - `# BEGIN OnboardingVPSOpenClaw managed keys`
+  - `# END OnboardingVPSOpenClaw managed keys`
 
 ## WireGuard Key Handling
 
@@ -116,9 +129,11 @@ The scripts are designed to reduce lockout risk:
 
 1. SSH config is written to `/etc/ssh/sshd_config.d/99-openclaw-hardening.conf`.
 2. `sshd -t` is executed before reload.
-3. SSH daemon is reloaded (not hard restarted).
-4. Script verifies SSH is listening on `SSH_PORT`.
-5. If `SSH_KEEP_CURRENT_PORT=true`, script also keeps current SSH port open in SSH and UFW.
+3. `ssh.socket` is disabled and masked if present, and `ssh.service` is explicitly enabled for boot.
+4. SSH daemon is reloaded or restarted safely depending on socket activation state.
+5. Script verifies SSH is listening on `SSH_PORT`.
+6. If `SSH_KEEP_CURRENT_PORT=true`, script also keeps current SSH port open in SSH and UFW.
+7. SSH is allowed on both the public interface and `wg0`.
 
 Recommended migration procedure:
 
@@ -149,3 +164,21 @@ google-authenticator
 ```
 
 After all required users are enrolled, you can harden further by removing `nullok` manually from `/etc/pam.d/sshd`.
+
+## Reboot Verification
+
+After a reboot, verify:
+
+```bash
+sudo systemctl status ssh --no-pager
+sudo systemctl status ssh.socket --no-pager
+sudo ss -lntp | grep sshd
+ip -4 rule show
+```
+
+Expected state:
+
+- `ssh.service` enabled and active
+- `ssh.socket` masked or inactive
+- `sshd` listening on your configured SSH port
+- public SSH return-path rule present when full-tunnel WireGuard is enabled

@@ -42,6 +42,7 @@ source "$CONFIG_FILE"
 set +a
 
 require_var SSH_PORT
+require_var SSH_LOGIN_USER
 require_var OPENCLAW_PORT
 require_var ENABLE_SSH_MFA
 require_port SSH_PORT

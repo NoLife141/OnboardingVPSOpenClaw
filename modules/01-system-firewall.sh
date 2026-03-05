@@ -22,6 +22,98 @@ require_port() {
   fi
 }
 
+collect_managed_ssh_keys() {
+  local var_name
+  local key_names=()
+
+  while IFS= read -r var_name; do
+    key_names+=("$var_name")
+  done < <(compgen -A variable | grep -E '^SSH_AUTHORIZED_KEY_[0-9]+$' | sort -V || true)
+
+  if (( ${#key_names[@]} == 0 )); then
+    return 1
+  fi
+
+  local found=0
+  for var_name in "${key_names[@]}"; do
+    if [[ -n "${!var_name:-}" ]]; then
+      found=1
+      printf '%s\n' "${!var_name}"
+    fi
+  done
+
+  (( found == 1 ))
+}
+
+ensure_login_user_exists() {
+  if ! getent passwd "$SSH_LOGIN_USER" >/dev/null; then
+    log_error "SSH_LOGIN_USER does not exist: ${SSH_LOGIN_USER}"
+    exit 1
+  fi
+
+  SSH_LOGIN_HOME="$(getent passwd "$SSH_LOGIN_USER" | cut -d: -f6)"
+  if [[ -z "$SSH_LOGIN_HOME" || ! -d "$SSH_LOGIN_HOME" ]]; then
+    log_error "Home directory for ${SSH_LOGIN_USER} is missing: ${SSH_LOGIN_HOME:-<empty>}"
+    exit 1
+  fi
+}
+
+ensure_authorized_keys_managed() {
+  local ssh_dir="${SSH_LOGIN_HOME}/.ssh"
+  local auth_keys="${ssh_dir}/authorized_keys"
+  local tmp_keys
+  local tmp_auth
+  local begin_marker="# BEGIN OnboardingVPSOpenClaw managed keys"
+  local end_marker="# END OnboardingVPSOpenClaw managed keys"
+
+  tmp_keys="$(mktemp)"
+  if ! collect_managed_ssh_keys > "$tmp_keys"; then
+    rm -f "$tmp_keys"
+    log_error "No SSH_AUTHORIZED_KEY_* entries defined. Refusing to disable password auth without managed keys."
+    exit 1
+  fi
+
+  install -d -m 0700 -o "$SSH_LOGIN_USER" -g "$SSH_LOGIN_USER" "$ssh_dir"
+  if [[ ! -f "$auth_keys" ]]; then
+    install -m 0600 -o "$SSH_LOGIN_USER" -g "$SSH_LOGIN_USER" /dev/null "$auth_keys"
+  fi
+
+  tmp_auth="$(mktemp)"
+  awk -v begin="$begin_marker" -v end="$end_marker" '
+    $0 == begin { skip = 1; next }
+    $0 == end { skip = 0; next }
+    !skip { print }
+  ' "$auth_keys" > "$tmp_auth"
+
+  {
+    cat "$tmp_auth"
+    if [[ -s "$tmp_auth" ]] && [[ "$(tail -c1 "$tmp_auth" 2>/dev/null || true)" != $'\n' ]]; then
+      printf '\n'
+    fi
+    printf '%s\n' "$begin_marker"
+    cat "$tmp_keys"
+    printf '%s\n' "$end_marker"
+  } > "${tmp_auth}.new"
+
+  install -m 0600 -o "$SSH_LOGIN_USER" -g "$SSH_LOGIN_USER" "${tmp_auth}.new" "$auth_keys"
+  chmod 700 "$ssh_dir"
+  chmod 600 "$auth_keys"
+
+  if ! awk -v begin="$begin_marker" -v end="$end_marker" '
+    $0 == begin { in_block = 1; next }
+    $0 == end { in_block = 0 }
+    in_block && NF { found = 1 }
+    END { exit(found ? 0 : 1) }
+  ' "$auth_keys"; then
+    rm -f "$tmp_keys" "$tmp_auth" "${tmp_auth}.new"
+    log_error "Managed authorized_keys block is empty after update."
+    exit 1
+  fi
+
+  rm -f "$tmp_keys" "$tmp_auth" "${tmp_auth}.new"
+  log_info "Managed authorized_keys for ${SSH_LOGIN_USER}"
+}
+
 package_installed() {
   dpkg -s "$1" >/dev/null 2>&1
 }
@@ -115,6 +207,37 @@ write_sshd_hardening_config() {
   rm -f "$tmp_file"
 }
 
+ensure_ssh_service_enabled() {
+  if ! command -v systemctl >/dev/null 2>&1; then
+    return
+  fi
+
+  systemctl unmask ssh.service >/dev/null 2>&1 || true
+  if systemctl list-unit-files | grep -q '^ssh\.service'; then
+    systemctl enable ssh.service >/dev/null 2>&1 || true
+  elif systemctl list-unit-files | grep -q '^sshd\.service'; then
+    systemctl enable sshd.service >/dev/null 2>&1 || true
+  fi
+}
+
+validate_ssh_service_enabled() {
+  if ! command -v systemctl >/dev/null 2>&1; then
+    return
+  fi
+
+  if systemctl list-unit-files | grep -q '^ssh\.service'; then
+    if ! systemctl is-enabled ssh.service >/dev/null 2>&1; then
+      log_error "ssh.service is not enabled for boot."
+      exit 1
+    fi
+  elif systemctl list-unit-files | grep -q '^sshd\.service'; then
+    if ! systemctl is-enabled sshd.service >/dev/null 2>&1; then
+      log_error "sshd.service is not enabled for boot."
+      exit 1
+    fi
+  fi
+}
+
 reload_ssh_safely() {
   local sshd_bin
   local restart_required="false"
@@ -146,6 +269,8 @@ reload_ssh_safely() {
       fi
     fi
   fi
+
+  ensure_ssh_service_enabled
 
   if command -v systemctl >/dev/null 2>&1; then
     if [[ "$restart_required" == "true" ]]; then
@@ -201,6 +326,8 @@ reload_ssh_safely() {
     log_error "SSH daemon is not listening on new port ${SSH_PORT} after reload."
     exit 1
   fi
+
+  validate_ssh_service_enabled
 }
 
 if [[ $EUID -ne 0 ]]; then
@@ -220,6 +347,7 @@ source "$CONFIG_FILE"
 set +a
 
 require_var SSH_PORT
+require_var SSH_LOGIN_USER
 require_var OPENCLAW_PORT
 require_var ENABLE_SSH_MFA
 require_port SSH_PORT
@@ -256,18 +384,23 @@ if [[ "$ENABLE_SSH_MFA" == "true" ]]; then
   install_packages_if_missing libpam-google-authenticator
 fi
 
+ensure_login_user_exists
+ensure_authorized_keys_managed
 ensure_pam_google_authenticator
 write_sshd_hardening_config
 reload_ssh_safely
 
 log_info "Allowing SSH on ${PUBLIC_INTERFACE}:${SSH_PORT}"
 ufw allow in on "$PUBLIC_INTERFACE" proto tcp to any port "$SSH_PORT" comment 'OpenClaw SSH'
+log_info "Allowing SSH on ${WG_INTERFACE}:${SSH_PORT}"
+ufw allow in on "$WG_INTERFACE" proto tcp to any port "$SSH_PORT" comment 'OpenClaw SSH WireGuard'
 
 if [[ "${SSH_KEEP_CURRENT_PORT:-true}" == "true" ]] \
   && [[ -n "$CURRENT_SSH_PORT" ]] \
   && [[ "$CURRENT_SSH_PORT" != "$SSH_PORT" ]]; then
   log_warn "Keeping current SSH port ${CURRENT_SSH_PORT} open to avoid lockout."
   ufw allow in on "$PUBLIC_INTERFACE" proto tcp to any port "$CURRENT_SSH_PORT" comment 'OpenClaw SSH legacy'
+  ufw allow in on "$WG_INTERFACE" proto tcp to any port "$CURRENT_SSH_PORT" comment 'OpenClaw SSH legacy WireGuard'
 fi
 
 log_info "Allowing OpenClaw only on ${WG_INTERFACE}:${OPENCLAW_PORT}"

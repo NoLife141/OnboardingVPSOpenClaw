@@ -296,6 +296,13 @@ validate_policy_routing() {
       exit 1
     fi
   fi
+
+  if [[ -n "${SSH_PORT:-}" ]]; then
+    if ! ss -lntH "( sport = :${SSH_PORT} )" | grep -q '.'; then
+      log_error "SSH daemon is not listening on ${SSH_PORT} after WireGuard startup."
+      exit 1
+    fi
+  fi
 }
 
 if [[ $EUID -ne 0 ]]; then
