@@ -23,7 +23,7 @@ The scripts configure:
 - `install.sh`: master orchestrator
 - `modules/01-system-firewall.sh`: SSH hardening + UFW
 - `modules/02-wireguard.sh`: WireGuard setup + policy routing validation
-- `modules/03-openclaw-docker.sh`: host preparation for manual OpenClaw install (legacy filename kept for compatibility)
+- `modules/03-openclaw-host-prep.sh`: host preparation for manual OpenClaw install
 
 ## 1. Copy files to VPS
 
@@ -88,7 +88,7 @@ Recommended migration procedure:
 
 ## What Module 03 Does Now
 
-`modules/03-openclaw-docker.sh` now prepares the host only:
+`modules/03-openclaw-host-prep.sh` prepares the host only:
 
 - installs baseline packages (`curl`, `git`, etc.)
 - optionally installs Node (`NODEJS_MAJOR_VERSION`, default `22`)

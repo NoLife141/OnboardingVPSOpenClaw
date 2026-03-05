@@ -21,8 +21,8 @@ Updates packages, installs UFW, configures the firewall rules, and hardens SSH (
 `modules/02-wireguard.sh`
 Installs WireGuard, writes `/etc/wireguard/wg0.conf` using the config variables, enables IP forwarding if necessary, and starts `wg-quick@wg0`.
 
-`modules/03-openclaw-docker.sh`
-Installs Docker (if missing), creates a directory for OpenClaw, generates the `docker-compose.yml` binding to the WG IP, and starts the container.
+`modules/03-openclaw-host-prep.sh`
+Prepares the VPS for manual OpenClaw installation (optional Node.js/pnpm install, create setup directory/user, and write host setup hints). It must not install or run OpenClaw itself.
 
 `README.md`
 Instructions for the human operator on how to copy the repository to the VPS, fill out `config.env`, and run `./install.sh`.

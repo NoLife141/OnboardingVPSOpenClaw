@@ -64,7 +64,7 @@ fi
 MODULES=(
   "${SCRIPT_DIR}/modules/01-system-firewall.sh"
   "${SCRIPT_DIR}/modules/02-wireguard.sh"
-  "${SCRIPT_DIR}/modules/03-openclaw-docker.sh"
+  "${SCRIPT_DIR}/modules/03-openclaw-host-prep.sh"
 )
 
 for module in "${MODULES[@]}"; do

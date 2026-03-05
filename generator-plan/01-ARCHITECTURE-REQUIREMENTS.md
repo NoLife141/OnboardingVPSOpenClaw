@@ -18,6 +18,7 @@ The generated scripts must configure the VPS to achieve the following state:
 - Ensure `PubkeyAuthentication` is enabled.
 - Add an optional flag in the config to install and configure Google Authenticator PAM for MFA (`AuthenticationMethods publickey,keyboard-interactive`).
 
-## 4. OpenClaw Deployment
-- Assume OpenClaw will run via Docker Compose.
-- Generate a `docker-compose.yml` template that binds the OpenClaw UI/API strictly to the VPS's WireGuard interface IP (e.g., `10.x.x.x:3000:3000`).
+## 4. OpenClaw Host Preparation
+- Do not install or run OpenClaw in these scripts.
+- Prepare the VPS for a future manual host install (system packages, optional Node.js 22+, optional pnpm, dedicated directory/user).
+- Keep network exposure aligned with UFW/WireGuard constraints so the later OpenClaw process can bind to the WireGuard IP (e.g., `10.x.x.x:3000`).
