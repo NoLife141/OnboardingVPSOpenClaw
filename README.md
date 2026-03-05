@@ -131,9 +131,10 @@ The scripts are designed to reduce lockout risk:
 2. `sshd -t` is executed before reload.
 3. `ssh.socket` is disabled and masked if present, and `ssh.service` is explicitly enabled for boot.
 4. SSH daemon is reloaded or restarted safely depending on socket activation state.
-5. Script verifies SSH is listening on `SSH_PORT`.
-6. If `SSH_KEEP_CURRENT_PORT=true`, script also keeps current SSH port open in SSH and UFW.
-7. SSH is allowed on both the public interface and `wg0`.
+5. A systemd boot-guard unit is installed to start SSH after boot if the image has unusual SSH unit wiring.
+6. Script verifies SSH is listening on `SSH_PORT`.
+7. If `SSH_KEEP_CURRENT_PORT=true`, script also keeps current SSH port open in SSH and UFW.
+8. SSH is allowed on both the public interface and `wg0`.
 
 Recommended migration procedure:
 
