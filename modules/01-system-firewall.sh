@@ -109,10 +109,31 @@ reload_ssh_safely() {
     exit 1
   fi
 
-  if systemctl list-unit-files | grep -q '^ssh\.service'; then
-    systemctl reload ssh
+  if command -v systemctl >/dev/null 2>&1; then
+    if systemctl reload ssh >/dev/null 2>&1; then
+      :
+    elif systemctl reload ssh.service >/dev/null 2>&1; then
+      :
+    elif systemctl reload sshd >/dev/null 2>&1; then
+      :
+    elif systemctl reload sshd.service >/dev/null 2>&1; then
+      :
+    else
+      log_error "Unable to reload SSH via systemctl (tried ssh/sshd service names)."
+      exit 1
+    fi
+  elif command -v service >/dev/null 2>&1; then
+    if service ssh reload >/dev/null 2>&1; then
+      :
+    elif service sshd reload >/dev/null 2>&1; then
+      :
+    else
+      log_error "Unable to reload SSH via service command (tried ssh/sshd)."
+      exit 1
+    fi
   else
-    systemctl reload sshd
+    log_error "No supported service manager found to reload SSH."
+    exit 1
   fi
 
   if ! ss -lntH "( sport = :${SSH_PORT} )" | grep -q '.'; then
