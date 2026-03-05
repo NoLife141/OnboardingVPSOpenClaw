@@ -62,7 +62,7 @@ Edit `config.env` and fill values:
 - `OPENCLAW_SETUP_DIR`: directory prepared for later OpenClaw install
 - `OPENCLAW_SETUP_USER`: owner for prepared directory
 - `INSTALL_NODEJS`: install Node runtime for OpenClaw prerequisites
-- `NODEJS_MAJOR_VERSION`: minimum Node major version (default `22`)
+- `NODEJS_MAJOR_VERSION`: minimum Node major version (default `25`)
 - `INSTALL_PNPM`: optional pnpm install
 
 ## 3. Run installer
@@ -110,7 +110,7 @@ Recommended migration procedure:
 `modules/03-openclaw-host-prep.sh` prepares the host only:
 
 - installs baseline packages (`curl`, `git`, etc.)
-- optionally installs Node (`NODEJS_MAJOR_VERSION`, default `22`)
+- optionally installs Node (`NODEJS_MAJOR_VERSION`, default `25`)
 - optionally installs pnpm
 - creates prep directory and optional service user
 - writes `${OPENCLAW_SETUP_DIR}/openclaw-host-setup.env` with bind/port hints
