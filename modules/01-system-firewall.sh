@@ -503,6 +503,10 @@ reload_ssh_safely() {
     exit 1
   fi
 
+  if command -v systemctl >/dev/null 2>&1; then
+    systemctl daemon-reload >/dev/null 2>&1 || true
+  fi
+
   validate_ssh_service_enabled
 }
 
