@@ -268,7 +268,7 @@ validate_policy_routing() {
   fi
 
   if [[ "${WG_PRESERVE_PUBLIC_SSH_ROUTE}" == "true" && -n "${WG_PUBLIC_SSH_SOURCE_IP}" ]]; then
-    if ! ip -4 rule show | grep -q "from ${WG_PUBLIC_SSH_SOURCE_IP}/32 lookup main"; then
+    if ! ip -4 rule show | grep -Eq "from ${WG_PUBLIC_SSH_SOURCE_IP}(/32)? .*lookup main"; then
       log_error "Public SSH return-path rule missing for ${WG_PUBLIC_SSH_SOURCE_IP}/32."
       exit 1
     fi
