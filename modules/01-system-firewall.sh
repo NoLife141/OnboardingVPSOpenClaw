@@ -391,6 +391,8 @@ validate_ssh_service_enabled() {
 
 reload_ssh_safely() {
   local restart_required="false"
+  local found="false"
+  local _i
 
   if [[ -z "${SSHD_BIN:-}" ]]; then
     log_error "Unable to locate sshd binary."
@@ -452,8 +454,6 @@ reload_ssh_safely() {
     exit 1
   fi
 
-  local found="false"
-  local _i
   for _i in $(seq 1 20); do
     if ss -lntH "( sport = :${SSH_PORT} )" | grep -q '.'; then
       found="true"
@@ -461,6 +461,22 @@ reload_ssh_safely() {
     fi
     sleep 0.25
   done
+
+  if [[ "$found" != "true" ]] && command -v systemctl >/dev/null 2>&1 && [[ -n "${SSH_SERVICE_UNIT:-}" ]]; then
+    log_warn "SSH reload did not open port ${SSH_PORT}. Trying a full service restart."
+    if ! systemctl restart "${SSH_SERVICE_UNIT}" >/dev/null 2>&1; then
+      log_error "Unable to restart SSH service ${SSH_SERVICE_UNIT} after reload failed to apply new port."
+      exit 1
+    fi
+
+    for _i in $(seq 1 20); do
+      if ss -lntH "( sport = :${SSH_PORT} )" | grep -q '.'; then
+        found="true"
+        break
+      fi
+      sleep 0.25
+    done
+  fi
 
   if [[ "$found" != "true" ]]; then
     log_error "SSH daemon is not listening on new port ${SSH_PORT} after reload."
