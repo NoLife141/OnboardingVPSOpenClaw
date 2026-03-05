@@ -94,6 +94,7 @@ write_sshd_hardening_config() {
 
 reload_ssh_safely() {
   local sshd_bin
+  local restart_required="false"
   sshd_bin="$(command -v sshd || true)"
   if [[ -z "$sshd_bin" && -x /usr/sbin/sshd ]]; then
     sshd_bin="/usr/sbin/sshd"
@@ -109,8 +110,34 @@ reload_ssh_safely() {
     exit 1
   fi
 
+  # Ubuntu/Debian may enable ssh.socket (socket activation) on port 22.
+  # In that case, sshd Port directives are ignored until the socket is disabled.
   if command -v systemctl >/dev/null 2>&1; then
-    if systemctl reload ssh >/dev/null 2>&1; then
+    if systemctl list-unit-files | grep -q '^ssh\.socket'; then
+      if systemctl is-active --quiet ssh.socket || systemctl is-enabled --quiet ssh.socket; then
+        log_warn "Detected active ssh.socket. Disabling socket activation so SSH can bind configured ports."
+        systemctl disable --now ssh.socket >/dev/null 2>&1 || true
+        systemctl stop ssh.socket >/dev/null 2>&1 || true
+        restart_required="true"
+      fi
+    fi
+  fi
+
+  if command -v systemctl >/dev/null 2>&1; then
+    if [[ "$restart_required" == "true" ]]; then
+      if systemctl restart ssh >/dev/null 2>&1; then
+        :
+      elif systemctl restart ssh.service >/dev/null 2>&1; then
+        :
+      elif systemctl restart sshd >/dev/null 2>&1; then
+        :
+      elif systemctl restart sshd.service >/dev/null 2>&1; then
+        :
+      else
+        log_error "Unable to restart SSH after disabling ssh.socket."
+        exit 1
+      fi
+    elif systemctl reload ssh >/dev/null 2>&1; then
       :
     elif systemctl reload ssh.service >/dev/null 2>&1; then
       :
@@ -136,7 +163,17 @@ reload_ssh_safely() {
     exit 1
   fi
 
-  if ! ss -lntH "( sport = :${SSH_PORT} )" | grep -q '.'; then
+  local found="false"
+  local _i
+  for _i in $(seq 1 20); do
+    if ss -lntH "( sport = :${SSH_PORT} )" | grep -q '.'; then
+      found="true"
+      break
+    fi
+    sleep 0.25
+  done
+
+  if [[ "$found" != "true" ]]; then
     log_error "SSH daemon is not listening on new port ${SSH_PORT} after reload."
     exit 1
   fi
