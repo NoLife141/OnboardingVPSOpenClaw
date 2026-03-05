@@ -88,6 +88,14 @@ If `WG_VPS_PRIVKEY` is empty, module 2 will:
 
 Private keys are never printed in logs.
 
+## Post-WireGuard APT Behavior
+
+If `WG_ALLOWED_IPS` is IPv4-only (for example `0.0.0.0/0`), module 2 writes:
+
+- `/etc/apt/apt.conf.d/99-openclaw-force-ipv4`
+
+This avoids `apt` stalls on unreachable IPv6 endpoints after the full-tunnel route is enabled.
+
 ## SSH Lockout Safety Model
 
 The scripts are designed to reduce lockout risk:

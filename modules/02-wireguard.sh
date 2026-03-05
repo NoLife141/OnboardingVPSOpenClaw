@@ -70,6 +70,24 @@ resolve_wireguard_private_key() {
   log_info "WireGuard public key saved at ${key_file}.pub (add it to your home server peer config)."
 }
 
+configure_apt_ipv4_fallback() {
+  local apt_cfg="/etc/apt/apt.conf.d/99-openclaw-force-ipv4"
+
+  # If tunnel policy is IPv4-only, apt may stall on unreachable IPv6 endpoints.
+  if [[ "${WG_ALLOWED_IPS}" != *"::/0"* ]]; then
+    cat > "$apt_cfg" <<'EOF'
+Acquire::ForceIPv4 "true";
+EOF
+    chmod 0644 "$apt_cfg"
+    log_info "Enabled APT IPv4 fallback at ${apt_cfg} (WG_ALLOWED_IPS is IPv4-only)."
+  else
+    if [[ -f "$apt_cfg" ]]; then
+      rm -f "$apt_cfg"
+      log_info "Removed APT IPv4 fallback because WG_ALLOWED_IPS includes IPv6."
+    fi
+  fi
+}
+
 write_wireguard_config() {
   local wg_conf_path="/etc/wireguard/${WG_INTERFACE}.conf"
   local tmp_file
@@ -189,4 +207,5 @@ else
 fi
 
 validate_policy_routing
+configure_apt_ipv4_fallback
 log_info "WireGuard private egress configuration completed."
