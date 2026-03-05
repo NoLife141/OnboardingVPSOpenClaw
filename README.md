@@ -71,6 +71,13 @@ Edit `config.env` and fill values:
 sudo ./install.sh
 ```
 
+Installer execution order is:
+1. `01-system-firewall.sh`
+2. `03-openclaw-host-prep.sh`
+3. `02-wireguard.sh`
+
+This order ensures host package setup happens before full-tunnel WireGuard routing is enabled.
+
 ## WireGuard Key Handling
 
 If `WG_VPS_PRIVKEY` is empty, module 2 will:

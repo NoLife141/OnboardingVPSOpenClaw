@@ -22,6 +22,37 @@ require_bool() {
   fi
 }
 
+apt_update_ipv4() {
+  apt-get -o Acquire::ForceIPv4=true update -y
+}
+
+apt_install_ipv4() {
+  DEBIAN_FRONTEND=noninteractive apt-get -o Acquire::ForceIPv4=true install -y "$@"
+}
+
+package_installed() {
+  dpkg -s "$1" >/dev/null 2>&1
+}
+
+install_packages_if_missing() {
+  local missing=()
+  local pkg
+
+  for pkg in "$@"; do
+    if ! package_installed "$pkg"; then
+      missing+=("$pkg")
+    fi
+  done
+
+  if (( ${#missing[@]} == 0 )); then
+    log_info "Required packages already installed: $*"
+    return
+  fi
+
+  apt_update_ipv4
+  apt_install_ipv4 "${missing[@]}"
+}
+
 node_major_version() {
   if ! command -v node >/dev/null 2>&1; then
     return 1
@@ -36,8 +67,7 @@ ensure_nodesource_repo() {
   local list_file="/etc/apt/sources.list.d/nodesource.list"
   local list_line="deb [signed-by=${keyring}] https://deb.nodesource.com/node_${major}.x nodistro main"
 
-  apt-get update -y
-  DEBIAN_FRONTEND=noninteractive apt-get install -y ca-certificates curl gnupg
+  install_packages_if_missing ca-certificates curl gnupg
 
   install -d -m 0755 /etc/apt/keyrings
   if [[ ! -f "$keyring" ]]; then
@@ -63,8 +93,8 @@ install_node_if_needed() {
   fi
 
   ensure_nodesource_repo "$required_major"
-  apt-get update -y
-  DEBIAN_FRONTEND=noninteractive apt-get install -y nodejs
+  apt_update_ipv4
+  apt_install_ipv4 nodejs
   log_info "Node installation complete: $(node -v)"
 }
 
@@ -168,8 +198,7 @@ if [[ ! "${NODEJS_MAJOR_VERSION}" =~ ^[0-9]+$ ]] || (( NODEJS_MAJOR_VERSION < 18
 fi
 
 log_info "Installing baseline host packages."
-apt-get update -y
-DEBIAN_FRONTEND=noninteractive apt-get install -y ca-certificates curl git jq unzip
+install_packages_if_missing ca-certificates curl git jq unzip
 
 if [[ "${INSTALL_NODEJS}" == "true" ]]; then
   install_node_if_needed "${NODEJS_MAJOR_VERSION}"
