@@ -22,6 +22,15 @@ require_port() {
   fi
 }
 
+require_bool() {
+  local name="$1"
+  local value="${!name:-}"
+  if [[ "$value" != "true" && "$value" != "false" ]]; then
+    log_error "${name} must be true or false."
+    exit 1
+  fi
+}
+
 collect_managed_ssh_keys() {
   local var_name
   local key_names=()
@@ -46,6 +55,25 @@ collect_managed_ssh_keys() {
 }
 
 ensure_login_user_exists() {
+  if [[ "$SSH_LOGIN_USER" == "root" ]]; then
+    log_error "SSH_LOGIN_USER must not be root."
+    exit 1
+  fi
+
+  if ! getent passwd "$SSH_LOGIN_USER" >/dev/null; then
+    if [[ "${SSH_CREATE_LOGIN_USER}" != "true" ]]; then
+      log_error "SSH_LOGIN_USER does not exist: ${SSH_LOGIN_USER}"
+      exit 1
+    fi
+
+    useradd --create-home --shell "${SSH_LOGIN_USER_SHELL}" "${SSH_LOGIN_USER}"
+    log_info "Created SSH login user ${SSH_LOGIN_USER}."
+  fi
+
+  if [[ "${SSH_LOGIN_USER_SUDO}" == "true" ]]; then
+    usermod -aG sudo "$SSH_LOGIN_USER"
+  fi
+
   if ! getent passwd "$SSH_LOGIN_USER" >/dev/null; then
     log_error "SSH_LOGIN_USER does not exist: ${SSH_LOGIN_USER}"
     exit 1
@@ -252,6 +280,28 @@ ensure_pam_google_authenticator() {
   fi
 }
 
+configure_cloud_init_ssh_policy() {
+  local cloud_cfg_dir="/etc/cloud/cloud.cfg.d"
+  local target="${cloud_cfg_dir}/99-openclaw-ssh-hardening.cfg"
+  local tmp_file
+
+  if ! command -v cloud-init >/dev/null 2>&1 || [[ ! -d "$cloud_cfg_dir" ]]; then
+    log_info "cloud-init not detected; skipping cloud-init SSH hardening."
+    return
+  fi
+
+  tmp_file="$(mktemp)"
+  {
+    echo "# Managed by OnboardingVPSOpenClaw"
+    echo "ssh_pwauth: false"
+    echo "disable_root: true"
+  } > "$tmp_file"
+
+  install -m 0644 "$tmp_file" "$target"
+  rm -f "$tmp_file"
+  log_info "Wrote cloud-init SSH hardening: ${target}"
+}
+
 ensure_sshd_config_includes_dropins() {
   local target="/etc/ssh/sshd_config"
   local include_line="Include /etc/ssh/sshd_config.d/*.conf"
@@ -305,6 +355,8 @@ write_sshd_hardening_config() {
     echo "# Managed by OnboardingVPSOpenClaw"
     echo "PasswordAuthentication no"
     echo "PubkeyAuthentication yes"
+    echo "PermitRootLogin no"
+    echo "AllowUsers ${SSH_LOGIN_USER}"
     if [[ "$ENABLE_SSH_MFA" == "true" ]]; then
       echo "KbdInteractiveAuthentication yes"
       echo "ChallengeResponseAuthentication yes"
@@ -321,11 +373,57 @@ write_sshd_hardening_config() {
 
 validate_effective_sshd_port_config() {
   local effective_ports
+  local allowusers_value
+  local password_auth
+  local pubkey_auth
+  local permit_root_login
+  local kbd_interactive
+  local auth_methods
 
   effective_ports="$("$SSHD_BIN" -T 2>/dev/null | awk '/^port / {print $2}')"
   if ! grep -qx "$SSH_PORT" <<<"$effective_ports"; then
     log_error "Effective sshd config does not include target SSH port ${SSH_PORT}."
     exit 1
+  fi
+
+  password_auth="$("$SSHD_BIN" -T 2>/dev/null | awk '/^passwordauthentication / {print $2; exit}')"
+  pubkey_auth="$("$SSHD_BIN" -T 2>/dev/null | awk '/^pubkeyauthentication / {print $2; exit}')"
+  permit_root_login="$("$SSHD_BIN" -T 2>/dev/null | awk '/^permitrootlogin / {print $2; exit}')"
+  allowusers_value="$("$SSHD_BIN" -T 2>/dev/null | awk '/^allowusers / {sub(/^allowusers /, ""); print; exit}')"
+  kbd_interactive="$("$SSHD_BIN" -T 2>/dev/null | awk '/^kbdinteractiveauthentication / {print $2; exit}')"
+  auth_methods="$("$SSHD_BIN" -T 2>/dev/null | awk '/^authenticationmethods / {sub(/^authenticationmethods /, ""); print; exit}')"
+
+  if [[ "$password_auth" != "no" ]]; then
+    log_error "Effective sshd config must set PasswordAuthentication no."
+    exit 1
+  fi
+  if [[ "$pubkey_auth" != "yes" ]]; then
+    log_error "Effective sshd config must set PubkeyAuthentication yes."
+    exit 1
+  fi
+  if [[ "$permit_root_login" != "no" ]]; then
+    log_error "Effective sshd config must set PermitRootLogin no."
+    exit 1
+  fi
+  if [[ "$allowusers_value" != "$SSH_LOGIN_USER" ]]; then
+    log_error "Effective sshd config must restrict AllowUsers to ${SSH_LOGIN_USER}."
+    exit 1
+  fi
+
+  if [[ "$ENABLE_SSH_MFA" == "true" ]]; then
+    if [[ "$kbd_interactive" != "yes" ]]; then
+      log_error "Effective sshd config must enable KbdInteractiveAuthentication when MFA is enabled."
+      exit 1
+    fi
+    if [[ "$auth_methods" != "publickey,keyboard-interactive" ]]; then
+      log_error "Effective sshd config must require publickey,keyboard-interactive when MFA is enabled."
+      exit 1
+    fi
+  else
+    if [[ "$kbd_interactive" != "no" ]]; then
+      log_error "Effective sshd config must disable KbdInteractiveAuthentication when MFA is disabled."
+      exit 1
+    fi
   fi
 }
 
@@ -528,6 +626,9 @@ set +a
 
 require_var SSH_PORT
 require_var SSH_LOGIN_USER
+require_var SSH_CREATE_LOGIN_USER
+require_var SSH_LOGIN_USER_SUDO
+require_var SSH_LOGIN_USER_SHELL
 require_var OPENCLAW_PORT
 require_var ENABLE_SSH_MFA
 require_port SSH_PORT
@@ -535,12 +636,12 @@ require_port OPENCLAW_PORT
 if [[ -n "${SSH_CURRENT_PORT_OVERRIDE:-}" ]]; then
   require_port SSH_CURRENT_PORT_OVERRIDE
 fi
-if [[ "${SSH_KEEP_CURRENT_PORT:-true}" != "true" && "${SSH_KEEP_CURRENT_PORT:-true}" != "false" ]]; then
-  log_error "SSH_KEEP_CURRENT_PORT must be true or false."
-  exit 1
-fi
-if [[ "${ENABLE_SSH_MFA}" != "true" && "${ENABLE_SSH_MFA}" != "false" ]]; then
-  log_error "ENABLE_SSH_MFA must be true or false."
+require_bool SSH_KEEP_CURRENT_PORT
+require_bool SSH_CREATE_LOGIN_USER
+require_bool SSH_LOGIN_USER_SUDO
+require_bool ENABLE_SSH_MFA
+if [[ -z "${SSH_LOGIN_USER_SHELL}" || "${SSH_LOGIN_USER_SHELL}" != /* ]]; then
+  log_error "SSH_LOGIN_USER_SHELL must be an absolute shell path."
   exit 1
 fi
 
@@ -568,6 +669,7 @@ fi
 ensure_login_user_exists
 ensure_authorized_keys_managed
 ensure_pam_google_authenticator
+configure_cloud_init_ssh_policy
 ensure_sshd_config_includes_dropins
 write_sshd_port_block
 write_sshd_hardening_config

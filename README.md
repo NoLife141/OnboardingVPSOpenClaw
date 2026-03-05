@@ -49,7 +49,10 @@ cp config.env.example config.env
 Edit `config.env` and fill values:
 
 - `SSH_PORT`: target SSH port
-- `SSH_LOGIN_USER`: Linux user whose `authorized_keys` will be managed
+- `SSH_LOGIN_USER`: single non-root SSH admin account; root SSH is disabled
+- `SSH_CREATE_LOGIN_USER`: create `SSH_LOGIN_USER` if missing
+- `SSH_LOGIN_USER_SUDO`: add `SSH_LOGIN_USER` to sudo group
+- `SSH_LOGIN_USER_SHELL`: login shell used when creating `SSH_LOGIN_USER`
 - `SSH_KEEP_CURRENT_PORT`: keep currently used SSH port open for safe migration (`true` recommended on first run)
 - `SSH_CURRENT_PORT_OVERRIDE`: optional manual current SSH port fallback for migration safety
 - `SSH_AUTHORIZED_KEY_1`, `SSH_AUTHORIZED_KEY_2`, ...: inline public keys to install for `SSH_LOGIN_USER`
@@ -89,6 +92,10 @@ If another package job is running (for example unattended upgrades), the modules
 
 Module 1 manages a dedicated block in `${HOME}/.ssh/authorized_keys` for `SSH_LOGIN_USER`.
 
+- `SSH_LOGIN_USER` is the only SSH login account allowed by the managed SSH policy.
+- Root SSH is explicitly disabled (`PermitRootLogin no`).
+- If `SSH_CREATE_LOGIN_USER=true`, module 1 creates the SSH admin user before installing keys.
+- If `SSH_LOGIN_USER_SUDO=true`, module 1 adds that user to the `sudo` group.
 - Keys come from `SSH_AUTHORIZED_KEY_1`, `SSH_AUTHORIZED_KEY_2`, and so on.
 - At least one non-empty `SSH_AUTHORIZED_KEY_*` entry is required before password auth is disabled.
 - Existing unmanaged keys outside the managed block are preserved.
@@ -101,6 +108,21 @@ Before any SSH mutation, module 1 preflights the existing SSH stack:
 - it reuses the SSH server already present on the VPS when a usable `sshd` binary and service unit are detected
 - it installs `openssh-server` only if no usable SSH stack is found
 - it refuses to change ports, MFA, keys, sockets, or firewall state until that preflight succeeds
+
+## Cloud-Init Interplay
+
+On Ubuntu 24.04-style cloud images, cloud-init can override SSH password settings during provisioning.
+
+When cloud-init is present, module 1 writes:
+
+- `/etc/cloud/cloud.cfg.d/99-openclaw-ssh-hardening.cfg`
+
+with:
+
+- `ssh_pwauth: false`
+- `disable_root: true`
+
+The scripts do not edit `50-cloud-init.conf`. OpenSSH hardening remains authoritative through the managed `99-*` SSH drop-in and effective-config validation.
 
 ## WireGuard Key Handling
 
@@ -138,14 +160,16 @@ The scripts are designed to reduce lockout risk:
 1. SSH ports are managed directly in `/etc/ssh/sshd_config` with a dedicated managed block.
 2. SSH auth hardening is written to `/etc/ssh/sshd_config.d/99-openclaw-hardening.conf`.
 3. The script ensures `/etc/ssh/sshd_config` includes `sshd_config.d/*.conf`.
-4. `sshd -t` is executed before reload.
-5. `sshd -T` is checked to confirm the target SSH port is in the effective config.
-6. `ssh.socket` is disabled and masked if present, and `ssh.service` is explicitly enabled for boot.
-7. SSH daemon is reloaded or restarted safely depending on socket activation state.
-8. A systemd boot-guard unit is installed to start SSH after boot if the image has unusual SSH unit wiring.
-9. Script verifies SSH is listening on `SSH_PORT`.
-10. If `SSH_KEEP_CURRENT_PORT=true`, script also keeps current SSH port open in SSH and UFW.
-11. SSH is allowed on both the public interface and `wg0`.
+4. Root SSH is disabled and `AllowUsers` is restricted to `SSH_LOGIN_USER`.
+5. `sshd -t` is executed before reload.
+6. `sshd -T` is checked to confirm the target SSH port and effective auth policy are correct.
+7. When present, cloud-init is told not to re-enable SSH password auth or root login.
+8. `ssh.socket` is disabled and masked if present, and `ssh.service` is explicitly enabled for boot.
+9. SSH daemon is reloaded or restarted safely depending on socket activation state.
+10. A systemd boot-guard unit is installed to start SSH after boot if the image has unusual SSH unit wiring.
+11. Script verifies SSH is listening on `SSH_PORT`.
+12. If `SSH_KEEP_CURRENT_PORT=true`, script also keeps current SSH port open in SSH and UFW.
+13. SSH is allowed on both the public interface and `wg0`.
 
 Recommended migration procedure:
 
@@ -153,6 +177,13 @@ Recommended migration procedure:
 2. Open a second terminal and verify login works on new `SSH_PORT`.
 3. Set `SSH_KEEP_CURRENT_PORT=false` in `config.env`.
 4. Run installer again to remove legacy SSH port rule.
+
+Admin workflow after hardening:
+
+```bash
+ssh -p <SSH_PORT> <SSH_LOGIN_USER>@your-vps
+sudo -i
+```
 
 ## What Module 03 Does Now
 
@@ -182,6 +213,8 @@ After all required users are enrolled, you can harden further by removing `nullo
 After a reboot, verify:
 
 ```bash
+sudo cloud-init status || true
+sudo sshd -T | egrep 'passwordauthentication|permitrootlogin|allowusers|authenticationmethods|kbdinteractiveauthentication'
 sudo systemctl status ssh --no-pager
 sudo systemctl status ssh.socket --no-pager
 sudo ss -lntp | grep sshd
@@ -192,5 +225,8 @@ Expected state:
 
 - `ssh.service` enabled and active
 - `ssh.socket` masked or inactive
+- `passwordauthentication no`
+- `permitrootlogin no`
+- `allowusers` set to your `SSH_LOGIN_USER`
 - `sshd` listening on your configured SSH port
 - public SSH return-path rule present when full-tunnel WireGuard is enabled
